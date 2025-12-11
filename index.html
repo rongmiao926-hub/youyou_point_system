@@ -214,14 +214,6 @@
       color: #b91c1c;
     }
 
-    .pill {
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 11px;
-      background: #ecfeff;
-      color: #0e7490;
-    }
-
     .footer-tip {
       margin-top: 8px;
       font-size: 11px;
@@ -229,7 +221,7 @@
     }
   </style>
 
-  <!-- 用于导出 Excel 的库（SheetJS） -->
+  <!-- 用于导出/导入 Excel 的库（SheetJS） -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -398,12 +390,14 @@
       小提示：你可以随意修改上面的配置，多试几套「赚 / 花」方案，看不同设计下用户大概能攒多少积分、多久能兑出大件。
     </div>
 
-    <!-- 保存 / 载入 / 导出按钮 -->
+    <!-- 保存 / 载入 / 导出 / 导入按钮 -->
     <div style="margin-top: 10px; display:flex; flex-wrap:wrap; gap:8px;">
       <button id="saveConfigButton" class="secondary">💾 保存当前积分规则</button>
       <button id="loadConfigButton" class="secondary">📂 载入已保存规则</button>
       <button id="clearConfigButton" class="secondary">🧹 清除本地保存</button>
       <button id="exportXlsxButton" class="secondary">📑 导出规则为 Excel</button>
+      <button id="importXlsxButton" class="secondary">📥 导入规则（Excel）</button>
+      <input type="file" id="xlsxFileInput" accept=".xlsx,.xls" style="display:none;" />
     </div>
   </section>
 </div>
@@ -429,14 +423,13 @@
   const totalSpentSpan = document.getElementById("totalSpent");
   const balanceSpan = document.getElementById("balance");
 
-  // ====== 渲染列表：赚积分（带可编辑数字框） ======
+  // ====== 渲染列表：赚积分（可编辑积分） ======
   function renderEarnActions() {
     earnTableBody.innerHTML = "";
     if (earnActions.length === 0) {
       earnEmptyTip.style.display = "block";
     } else {
-      earnEmptyTip.style.display = "block";
-      earnEmptyTip.textContent = "提示：你可以继续添加，也可以删除不需要的途径。";
+      earnEmptyTip.style.display = "none";
     }
 
     earnActions.forEach(action => {
@@ -447,7 +440,7 @@
       nameTd.textContent = action.name;
       tr.appendChild(nameTd);
 
-      // 每次获得积分 —— 改成 input
+      // 每次获得积分 —— input
       const pointsTd = document.createElement("td");
       const input = document.createElement("input");
       input.type = "number";
@@ -460,7 +453,7 @@
         const newVal = Number(input.value);
         action.points = isNaN(newVal) || newVal < 0 ? 0 : newVal;
         input.value = action.points;
-        renderCalcTables(); // 更新模拟区展示的积分值
+        renderCalcTables(); // 更新模拟区使用的积分值
       });
 
       pointsTd.appendChild(input);
@@ -487,14 +480,13 @@
     });
   }
 
-  // ====== 渲染列表：花积分（带可编辑数字框） ======
+  // ====== 渲染列表：花积分（可编辑积分） ======
   function renderSpendActions() {
     spendTableBody.innerHTML = "";
     if (spendActions.length === 0) {
       spendEmptyTip.style.display = "block";
     } else {
-      spendEmptyTip.style.display = "block";
-      spendEmptyTip.textContent = "提示：你可以继续添加，也可以删除不需要的途径。";
+      spendEmptyTip.style.display = "none";
     }
 
     spendActions.forEach(action => {
@@ -505,7 +497,7 @@
       nameTd.textContent = action.name;
       tr.appendChild(nameTd);
 
-      // 每次消耗积分 —— 改成 input
+      // 每次消耗积分 —— input
       const pointsTd = document.createElement("td");
       const input = document.createElement("input");
       input.type = "number";
@@ -774,6 +766,60 @@
     XLSX.writeFile(wb, fileName);
   }
 
+  // ====== 从 Excel 导入规则 ======
+  function importConfigFromXlsx(file) {
+    if (!file) return;
+    const reader = new FileReader();
+
+    reader.onload = function (e) {
+      try {
+        const data = e.target.result;
+        const workbook = XLSX.read(data, { type: "array" });
+
+        const earnSheet = workbook.Sheets["EarnRules"];
+        const spendSheet = workbook.Sheets["SpendRules"];
+
+        if (!earnSheet || !spendSheet) {
+          alert("Excel 文件需包含名为 EarnRules 和 SpendRules 的 Sheet");
+          return;
+        }
+
+        const earnJson = XLSX.utils.sheet_to_json(earnSheet);
+        const spendJson = XLSX.utils.sheet_to_json(spendSheet);
+
+        // 重构 earnActions
+        earnActions = earnJson.map((row, idx) => ({
+          id: idx + 1,
+          name: row["途径名称"],
+          points: Number(row["每次积分"]) || 0
+        }));
+
+        const base = earnActions.length + 1;
+
+        // 重构 spendActions
+        spendActions = spendJson.map((row, idx) => ({
+          id: base + idx,
+          name: row["途径名称"],
+          points: Number(row["每次积分"]) || 0
+        }));
+
+        nextId = earnActions.length + spendActions.length + 1;
+
+        renderEarnActions();
+        renderSpendActions();
+        renderCalcTables();
+        resetAllCounts();
+
+        alert("已成功从 Excel 导入规则！");
+      } catch (err) {
+        console.error(err);
+        alert("Excel 文件解析失败，请检查格式是否正确（字段名应为：途径名称、每次积分）！");
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  }
+
   // ====== 事件绑定 ======
   document.getElementById("addEarnForm").addEventListener("submit", e => {
     e.preventDefault();
@@ -816,6 +862,16 @@
   document.getElementById("loadConfigButton").addEventListener("click", () => loadConfig(true));
   document.getElementById("clearConfigButton").addEventListener("click", clearConfig);
   document.getElementById("exportXlsxButton").addEventListener("click", exportConfigToXlsx);
+
+  document.getElementById("importXlsxButton").addEventListener("click", () => {
+    document.getElementById("xlsxFileInput").value = "";
+    document.getElementById("xlsxFileInput").click();
+  });
+
+  document.getElementById("xlsxFileInput").addEventListener("change", function () {
+    const file = this.files[0];
+    if (file) importConfigFromXlsx(file);
+  });
 
   // ====== 初始化：优先载入本地保存；没有则使用示例 ======
   function initExamples() {
