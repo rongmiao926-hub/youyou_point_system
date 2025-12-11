@@ -2,8 +2,10 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>积分系统设计与模拟</title>
+  <title>积分系统设计与模拟小工具</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- 样式 -->
   <style>
     * {
       box-sizing: border-box;
@@ -226,6 +228,9 @@
       color: #9ca3af;
     }
   </style>
+
+  <!-- 用于导出 Excel 的库（SheetJS） -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="container">
@@ -392,14 +397,23 @@
     <div class="footer-tip">
       小提示：你可以随意修改上面的配置，多试几套「赚 / 花」方案，看不同设计下用户大概能攒多少积分、多久能兑出大件。
     </div>
+
+    <!-- 保存 / 载入 / 导出按钮 -->
+    <div style="margin-top: 10px; display:flex; flex-wrap:wrap; gap:8px;">
+      <button id="saveConfigButton" class="secondary">💾 保存当前积分规则</button>
+      <button id="loadConfigButton" class="secondary">📂 载入已保存规则</button>
+      <button id="clearConfigButton" class="secondary">🧹 清除本地保存</button>
+      <button id="exportXlsxButton" class="secondary">📑 导出规则为 Excel</button>
+    </div>
   </section>
 </div>
 
 <script>
-  // ====== 数据结构 ======
+  // ====== 全局数据 ======
   let earnActions = [];
   let spendActions = [];
   let nextId = 1;
+  const STORAGE_KEY = "points-config-v1";
 
   const earnTableBody = document.getElementById("earnTableBody");
   const spendTableBody = document.getElementById("spendTableBody");
@@ -415,8 +429,7 @@
   const totalSpentSpan = document.getElementById("totalSpent");
   const balanceSpan = document.getElementById("balance");
 
-  // ====== 工具函数 ======
-
+  // ====== 渲染列表：赚积分（带可编辑数字框） ======
   function renderEarnActions() {
     earnTableBody.innerHTML = "";
     if (earnActions.length === 0) {
@@ -429,14 +442,35 @@
     earnActions.forEach(action => {
       const tr = document.createElement("tr");
 
+      // 途径名称
       const nameTd = document.createElement("td");
       nameTd.textContent = action.name;
       tr.appendChild(nameTd);
 
+      // 每次获得积分 —— 改成 input
       const pointsTd = document.createElement("td");
-      pointsTd.textContent = action.points + " 分";
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "1";
+      input.value = action.points;
+      input.style.width = "80px";
+
+      input.addEventListener("change", () => {
+        const newVal = Number(input.value);
+        action.points = isNaN(newVal) || newVal < 0 ? 0 : newVal;
+        input.value = action.points;
+        renderCalcTables(); // 更新模拟区展示的积分值
+      });
+
+      pointsTd.appendChild(input);
+      const unitSpan = document.createElement("span");
+      unitSpan.textContent = " 分";
+      unitSpan.style.marginLeft = "4px";
+      pointsTd.appendChild(unitSpan);
       tr.appendChild(pointsTd);
 
+      // 操作列：删除
       const opTd = document.createElement("td");
       const delBtn = document.createElement("button");
       delBtn.textContent = "删除";
@@ -453,6 +487,7 @@
     });
   }
 
+  // ====== 渲染列表：花积分（带可编辑数字框） ======
   function renderSpendActions() {
     spendTableBody.innerHTML = "";
     if (spendActions.length === 0) {
@@ -465,14 +500,35 @@
     spendActions.forEach(action => {
       const tr = document.createElement("tr");
 
+      // 途径名称
       const nameTd = document.createElement("td");
       nameTd.textContent = action.name;
       tr.appendChild(nameTd);
 
+      // 每次消耗积分 —— 改成 input
       const pointsTd = document.createElement("td");
-      pointsTd.textContent = action.points + " 分";
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "1";
+      input.value = action.points;
+      input.style.width = "80px";
+
+      input.addEventListener("change", () => {
+        const newVal = Number(input.value);
+        action.points = isNaN(newVal) || newVal < 0 ? 0 : newVal;
+        input.value = action.points;
+        renderCalcTables();
+      });
+
+      pointsTd.appendChild(input);
+      const unitSpan = document.createElement("span");
+      unitSpan.textContent = " 分";
+      unitSpan.style.marginLeft = "4px";
+      pointsTd.appendChild(unitSpan);
       tr.appendChild(pointsTd);
 
+      // 操作列：删除
       const opTd = document.createElement("td");
       const delBtn = document.createElement("button");
       delBtn.textContent = "删除";
@@ -489,7 +545,7 @@
     });
   }
 
-  // 渲染计算区域的两张表
+  // ====== 模拟区域表格 ======
   function renderCalcTables() {
     // 赚积分
     earnCalcBody.innerHTML = "";
@@ -570,12 +626,12 @@
     }
   }
 
-  // 计算积分
+  // ====== 计算积分 ======
   function calculatePoints() {
     let totalEarned = 0;
     let totalSpent = 0;
 
-    // 赚积分部分
+    // 赚积分
     const earnInputs = document.querySelectorAll(".earn-count-input");
     earnInputs.forEach(input => {
       const id = parseInt(input.dataset.actionId, 10);
@@ -588,12 +644,10 @@
       const subtotalTd = document.querySelector(
         '.earn-subtotal[data-action-id="' + id + '"]'
       );
-      if (subtotalTd) {
-        subtotalTd.textContent = subtotal;
-      }
+      if (subtotalTd) subtotalTd.textContent = subtotal;
     });
 
-    // 花积分部分
+    // 花积分
     const spendInputs = document.querySelectorAll(".spend-count-input");
     spendInputs.forEach(input => {
       const id = parseInt(input.dataset.actionId, 10);
@@ -606,23 +660,17 @@
       const subtotalTd = document.querySelector(
         '.spend-subtotal[data-action-id="' + id + '"]'
       );
-      if (subtotalTd) {
-        subtotalTd.textContent = subtotal;
-      }
+      if (subtotalTd) subtotalTd.textContent = subtotal;
     });
 
     const balance = totalEarned - totalSpent;
-
     totalEarnedSpan.textContent = totalEarned;
     totalSpentSpan.textContent = totalSpent;
     balanceSpan.textContent = balance;
 
     balanceSpan.classList.remove("positive", "negative");
-    if (balance > 0) {
-      balanceSpan.classList.add("positive");
-    } else if (balance < 0) {
-      balanceSpan.classList.add("negative");
-    }
+    if (balance > 0) balanceSpan.classList.add("positive");
+    else if (balance < 0) balanceSpan.classList.add("negative");
   }
 
   function resetAllCounts() {
@@ -642,9 +690,91 @@
     balanceSpan.classList.remove("positive", "negative");
   }
 
-  // ====== 事件绑定 ======
+  // ====== 本地保存逻辑 ======
+  function recomputeNextId() {
+    const all = [...earnActions, ...spendActions];
+    if (all.length === 0) nextId = 1;
+    else nextId = Math.max(...all.map(a => a.id || 0)) + 1;
+  }
 
-  // 添加赚积分
+  function saveConfig() {
+    const data = { earnActions, spendActions, nextId };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      alert("已保存到本浏览器（同一台设备、同一浏览器下会保留）");
+    } catch (e) {
+      console.error(e);
+      alert("保存失败：可能是浏览器禁止了本地存储。");
+    }
+  }
+
+  function loadConfig(showAlert = true) {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      if (showAlert) alert("没有找到之前保存的积分规则。");
+      return false;
+    }
+    try {
+      const data = JSON.parse(raw);
+      earnActions = Array.isArray(data.earnActions) ? data.earnActions : [];
+      spendActions = Array.isArray(data.spendActions) ? data.spendActions : [];
+      nextId = typeof data.nextId === "number" ? data.nextId : 1;
+      recomputeNextId();
+
+      renderEarnActions();
+      renderSpendActions();
+      renderCalcTables();
+      resetAllCounts();
+
+      if (showAlert) alert("已载入本地保存的积分规则。");
+      return true;
+    } catch (e) {
+      console.error(e);
+      if (showAlert) alert("保存的数据已损坏，无法读取。");
+      return false;
+    }
+  }
+
+  function clearConfig() {
+    localStorage.removeItem(STORAGE_KEY);
+    alert("已清除本地保存。当前页面上的内容不受影响。");
+  }
+
+  // ====== 导出为 Excel（xlsx） ======
+  function exportConfigToXlsx() {
+    if (typeof XLSX === "undefined") {
+      alert("当前环境无法使用 Excel 导出功能。");
+      return;
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    // sheet1：赚积分规则
+    const earnData = [["类型", "途径名称", "每次积分"]];
+    earnActions.forEach(a => {
+      earnData.push(["赚积分", a.name, a.points]);
+    });
+    const earnSheet = XLSX.utils.aoa_to_sheet(earnData);
+    XLSX.utils.book_append_sheet(wb, earnSheet, "EarnRules");
+
+    // sheet2：花积分规则
+    const spendData = [["类型", "途径名称", "每次积分"]];
+    spendActions.forEach(a => {
+      spendData.push(["花积分", a.name, a.points]);
+    });
+    const spendSheet = XLSX.utils.aoa_to_sheet(spendData);
+    XLSX.utils.book_append_sheet(wb, spendSheet, "SpendRules");
+
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    const fileName = `积分规则_${y}${m}${d}.xlsx`;
+
+    XLSX.writeFile(wb, fileName);
+  }
+
+  // ====== 事件绑定 ======
   document.getElementById("addEarnForm").addEventListener("submit", e => {
     e.preventDefault();
     const nameInput = document.getElementById("earnName");
@@ -655,19 +785,13 @@
     if (!name) return;
     if (isNaN(points) || points < 0) return;
 
-    earnActions.push({
-      id: nextId++,
-      name,
-      points
-    });
-
+    earnActions.push({ id: nextId++, name, points });
     nameInput.value = "";
     pointsInput.value = "";
     renderEarnActions();
     renderCalcTables();
   });
 
-  // 添加花积分
   document.getElementById("addSpendForm").addEventListener("submit", e => {
     e.preventDefault();
     const nameInput = document.getElementById("spendName");
@@ -678,12 +802,7 @@
     if (!name) return;
     if (isNaN(points) || points < 0) return;
 
-    spendActions.push({
-      id: nextId++,
-      name,
-      points
-    });
-
+    spendActions.push({ id: nextId++, name, points });
     nameInput.value = "";
     pointsInput.value = "";
     renderSpendActions();
@@ -691,11 +810,14 @@
   });
 
   document.getElementById("calcButton").addEventListener("click", calculatePoints);
-  document
-    .getElementById("resetCountsButton")
-    .addEventListener("click", resetAllCounts);
+  document.getElementById("resetCountsButton").addEventListener("click", resetAllCounts);
 
-  // ====== 初始化：给你放几条示例，方便一上来就能玩 ======
+  document.getElementById("saveConfigButton").addEventListener("click", saveConfig);
+  document.getElementById("loadConfigButton").addEventListener("click", () => loadConfig(true));
+  document.getElementById("clearConfigButton").addEventListener("click", clearConfig);
+  document.getElementById("exportXlsxButton").addEventListener("click", exportConfigToXlsx);
+
+  // ====== 初始化：优先载入本地保存；没有则使用示例 ======
   function initExamples() {
     earnActions = [
       { id: nextId++, name: "完成新手任务", points: 100 },
@@ -713,7 +835,12 @@
     renderCalcTables();
   }
 
-  initExamples();
+  function init() {
+    const loaded = loadConfig(false);
+    if (!loaded) initExamples();
+  }
+
+  init();
 </script>
 </body>
 </html>
